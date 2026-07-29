@@ -22,7 +22,7 @@ type Sample struct {
 	ValueBool   *bool             `json:"value_bool,omitempty"`
 	ValueJSON   json.RawMessage   `json:"value_json,omitempty"`
 	Labels      map[string]string `json:"labels,omitempty"`
-	ObservedAt  time.Time         `json:"observed_at"`
+	TS          time.Time         `json:"ts"`
 	SourceURL   string            `json:"source_url"`
 }
 
@@ -120,7 +120,7 @@ func buildSample(inputName, metricName, sourceURL string, observedAt time.Time, 
 		InputName:  inputName,
 		MetricName: metricName,
 		Labels:     labels,
-		ObservedAt: observedAt,
+		TS:         observedAt,
 		SourceURL:  sourceURL,
 	}
 

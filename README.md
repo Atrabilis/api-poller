@@ -74,10 +74,10 @@ inputs:
 
 ## Storage table shape
 
-The PostgreSQL writer creates the target schema/table automatically if needed
-with this generic row model:
+The PostgreSQL writer expects the target table to exist already, with this
+generic row model:
 
-- `observed_at timestamptz`
+- `ts timestamptz`
 - `input_name text`
 - `metric_name text`
 - `value_double double precision null`

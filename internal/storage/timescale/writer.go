@@ -92,8 +92,8 @@ func NewWriter(name string, cfg Config) (*Writer, error) {
 		return w, nil
 	}
 
-	if err := w.ensureTable(context.Background()); err != nil {
-		return nil, fmt.Errorf("ensure table %s for output %q: %w", w.fqn, name, err)
+	if err := w.ensureWritableTarget(context.Background()); err != nil {
+		return nil, fmt.Errorf("ensure writable target %s for output %q: %w", w.fqn, name, err)
 	}
 
 	w.available = true
@@ -128,7 +128,7 @@ func (w *Writer) WriteSamples(ctx context.Context, samples []poller.Sample) erro
 
 	query := fmt.Sprintf(`
 		INSERT INTO %s (
-			observed_at,
+			ts,
 			input_name,
 			metric_name,
 			value_double,
@@ -140,7 +140,7 @@ func (w *Writer) WriteSamples(ctx context.Context, samples []poller.Sample) erro
 			labels_key,
 			source_url
 		) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb, $10, $11)
-		ON CONFLICT (observed_at, input_name, metric_name, source_url, labels_key)
+		ON CONFLICT (ts, input_name, metric_name, source_url, labels_key)
 		DO UPDATE SET
 			value_double = EXCLUDED.value_double,
 			value_text = EXCLUDED.value_text,
@@ -159,7 +159,7 @@ func (w *Writer) WriteSamples(ctx context.Context, samples []poller.Sample) erro
 		if _, err := tx.Exec(
 			ctx,
 			query,
-			sample.ObservedAt.UTC(),
+			sample.TS.UTC(),
 			sample.InputName,
 			sample.MetricName,
 			sample.ValueDouble,
@@ -190,41 +190,50 @@ func (w *Writer) Close() {
 	}
 }
 
-func (w *Writer) ensureTable(ctx context.Context) error {
-	if _, err := w.pool.Exec(ctx, fmt.Sprintf(`CREATE SCHEMA IF NOT EXISTS %s`, w.schema)); err != nil {
+func (w *Writer) ensureWritableTarget(ctx context.Context) error {
+	rows, err := w.pool.Query(ctx, `
+		SELECT column_name
+		FROM information_schema.columns
+		WHERE table_schema = $1 AND table_name = $2
+	`, w.schema, w.table)
+	if err != nil {
 		return err
+	}
+	defer rows.Close()
+
+	columns := map[string]struct{}{}
+	for rows.Next() {
+		var col string
+		if err := rows.Scan(&col); err != nil {
+			return err
+		}
+		columns[strings.ToLower(strings.TrimSpace(col))] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(columns) == 0 {
+		return fmt.Errorf("table %s does not exist or is not visible to the writer role", w.fqn)
 	}
 
-	ddl := fmt.Sprintf(`
-		CREATE TABLE IF NOT EXISTS %s (
-			observed_at timestamptz NOT NULL,
-			input_name text NOT NULL,
-			metric_name text NOT NULL,
-			value_double double precision NULL,
-			value_text text NULL,
-			value_bool boolean NULL,
-			value_json jsonb NULL,
-			value_type text NOT NULL,
-			labels jsonb NOT NULL DEFAULT '{}'::jsonb,
-			labels_key text NOT NULL DEFAULT '',
-			source_url text NOT NULL,
-			PRIMARY KEY (observed_at, input_name, metric_name, source_url, labels_key)
-		)
-	`, w.fqn)
-	if _, err := w.pool.Exec(ctx, ddl); err != nil {
-		return err
+	required := []string{
+		"ts",
+		"input_name",
+		"metric_name",
+		"value_double",
+		"value_text",
+		"value_bool",
+		"value_json",
+		"value_type",
+		"labels",
+		"labels_key",
+		"source_url",
 	}
-
-	if _, err := w.pool.Exec(ctx, fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s_metric_time_idx ON %s (metric_name, observed_at DESC)`, w.table, w.fqn)); err != nil {
-		return err
+	for _, col := range required {
+		if _, ok := columns[col]; !ok {
+			return fmt.Errorf("table %s is missing required column %q", w.fqn, col)
+		}
 	}
-	if _, err := w.pool.Exec(ctx, fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s_input_time_idx ON %s (input_name, observed_at DESC)`, w.table, w.fqn)); err != nil {
-		return err
-	}
-	if _, err := w.pool.Exec(ctx, fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s_labels_gin_idx ON %s USING gin (labels)`, w.table, w.fqn)); err != nil {
-		return err
-	}
-	_, _ = w.pool.Exec(ctx, fmt.Sprintf(`SELECT create_hypertable('%s', 'observed_at', if_not_exists => true)`, w.fqn))
 	return nil
 }
 
