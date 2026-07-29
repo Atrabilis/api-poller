@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Atrabilis/api-poller/internal/config"
+	"github.com/Atrabilis/api-poller/internal/decode"
 	"github.com/Atrabilis/api-poller/internal/extract"
 )
 
@@ -71,9 +72,9 @@ func runInput(ctx context.Context, input config.Input) ([]Sample, error) {
 		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var payload any
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, fmt.Errorf("decode json: %w", err)
+	payload, err := decode.Payload(resp.Body, input.Response.Format)
+	if err != nil {
+		return nil, err
 	}
 
 	items, err := extract.ResolveItems(payload, input.Response.ItemsPath)

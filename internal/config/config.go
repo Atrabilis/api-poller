@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -102,6 +103,9 @@ func applyDefaults(cfg *Config) {
 		if input.Request.Timeout == 0 {
 			input.Request.Timeout = 5 * time.Second
 		}
+		if strings.TrimSpace(input.Response.Format) == "" {
+			input.Response.Format = "json"
+		}
 		for j := range input.Metrics {
 			if input.Metrics[j].Transform.Scale == 0 {
 				input.Metrics[j].Transform.Scale = 1
@@ -122,7 +126,9 @@ func validate(cfg Config) error {
 		if input.Request.URL == "" {
 			return fmt.Errorf("input %q is missing request.url", input.Name)
 		}
-		if input.Response.Format != "" && input.Response.Format != "json" {
+		switch input.Response.Format {
+		case "", "json", "xml":
+		default:
 			return fmt.Errorf("input %q has unsupported response.format %q", input.Name, input.Response.Format)
 		}
 		if len(input.Metrics) == 0 {

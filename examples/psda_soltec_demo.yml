@@ -1,0 +1,49 @@
+storage:
+  outputs:
+    - name: local_timescale
+      type: timescaledb
+      enabled: false
+      timescaledb:
+        host_env: TIMESCALE_HOST_LOCAL
+        port_env: TIMESCALE_PORT_LOCAL
+        user_env: TIMESCALE_USER_LOCAL
+        password_env: TIMESCALE_PASSWORD_LOCAL
+        database_env: TIMESCALE_DB_LOCAL
+        schema: psda
+        table: api_samples
+        sslmode: disable
+
+inputs:
+  - name: psda_soltec_atamo_1
+    request:
+      method: GET
+      url: http://127.0.0.1:13320/status.xml
+      timeout: 5s
+      headers:
+        Authorization: Basic YWRtaW46c29sdGVj
+    response:
+      format: xml
+    metrics:
+      - name: roll
+        value_path: $.roll
+        labels:
+          plant: psda
+          device: soltec_atamo_1
+          unit: deg
+      - name: rel_roll
+        value_path: $.rel_roll
+        labels:
+          plant: psda
+          device: soltec_atamo_1
+          unit: deg
+      - name: action
+        value_path: $.action
+        labels:
+          plant: psda
+          device: soltec_atamo_1
+      - name: temperature
+        value_path: $.temperature
+        labels:
+          plant: psda
+          device: soltec_atamo_1
+          unit: C
