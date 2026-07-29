@@ -1,0 +1,96 @@
+storage:
+  outputs:
+    - name: local_timescale
+      type: timescaledb
+      enabled: true
+      timescaledb:
+        host_env: TIMESCALE_HOST_LOCAL
+        port_env: TIMESCALE_PORT_LOCAL
+        user_env: TIMESCALE_USER_LOCAL
+        password_env: TIMESCALE_PASSWORD_LOCAL
+        database_env: TIMESCALE_DB_LOCAL
+        schema: psda
+        table: api_samples
+        sslmode: disable
+
+inputs:
+  - name: psda_moxa_ai_1mx401
+    request:
+      method: GET
+      url: http://127.0.0.1:18091/api/slot/0/io/ai
+      timeout: 5s
+      headers:
+        Accept: vdn.dac.v1
+        Content-Type: application/json
+    response:
+      format: json
+      items_path: $.io.ai
+    metrics:
+      - name: 1RC401_w_m2
+        value_path: $.aiValueScaled
+        where:
+          - path: $.aiIndex
+            equals: 0
+        transform:
+          scale: 150
+          offset: 0
+        labels:
+          device: 1MX401
+          unit: w.m-2
+      - name: 1RC401_temp_c
+        value_path: $.aiValueScaled
+        where:
+          - path: $.aiIndex
+            equals: 1
+        transform:
+          scale: 13
+          offset: -40
+        labels:
+          device: 1MX401
+          unit: C
+      - name: 1SP401_m_s
+        value_path: $.aiValueScaled
+        where:
+          - path: $.aiIndex
+            equals: 6
+        transform:
+          scale: 5
+          offset: 0
+        labels:
+          device: 1MX401
+          unit: m/s
+
+  - name: psda_moxa_rtd_1mx402
+    request:
+      method: GET
+      url: http://127.0.0.1:18092/api/slot/0/io/rtd
+      timeout: 5s
+      headers:
+        Accept: vdn.dac.v1
+        Content-Type: application/json
+    response:
+      format: json
+      items_path: $.io.rtd
+    metrics:
+      - name: 1TE401_c
+        value_path: $.rtdValueScaled
+        where:
+          - path: $.rtdIndex
+            equals: 0
+        transform:
+          scale: 1
+          offset: 8.6972
+        labels:
+          device: 1MX402
+          unit: C
+      - name: 1TE402_c
+        value_path: $.rtdValueScaled
+        where:
+          - path: $.rtdIndex
+            equals: 1
+        transform:
+          scale: 1
+          offset: 8.6972
+        labels:
+          device: 1MX402
+          unit: C
