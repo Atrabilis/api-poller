@@ -125,6 +125,51 @@ inputs:
 `body` is sent verbatim as the request payload; it's optional and only used
 when set, so existing `GET`-only inputs are unaffected.
 
+## Incremental polling with a cursor
+
+Some APIs return every record on every call unless you tell them where you
+left off (e.g. `_id > last_seen`). An input can opt into that by adding a
+`state` block:
+
+```yaml
+inputs:
+  - name: kizeo_form_1081184
+    state:
+      file: /var/lib/atamostec/api-poller/kizeo_form_1081184.cursor.json
+      placeholder: "__CURSOR__"   # optional, defaults to "__CURSOR__"
+      cursor_path: $._id          # path resolved against each extracted item
+      initial_value: "0"          # optional, defaults to "0"
+    request:
+      method: POST
+      url: https://forms.kizeo.com/rest/v3/forms/1081184/data/advanced
+      timeout: 10s
+      headers:
+        Authorization: "{{ kizeo_api_token }}"
+        Content-Type: application/json
+      body: |
+        {"filters":[{"field":"_id","operator":">","type":"int","val":"__CURSOR__"}],"order":[{"col":"_id","type":"asc"}]}
+    response:
+      format: json
+      items_path: $.data
+    metrics:
+      - name: tracker_1_atamo_i
+        value_path: $.tracker_1_atamo_i
+```
+
+Before the request is built, every occurrence of `placeholder` in
+`request.url` and `request.body` is replaced with the value persisted in
+`file` (or `initial_value` if `file` doesn't exist yet, e.g. on first run).
+After the poll, `file` is updated with the highest value found at
+`cursor_path` across the extracted items — but only after any configured
+storage write for that run succeeds, so a failed write is retried on the
+next poll instead of silently advancing past unwritten data. The comparison
+is numeric when possible and falls back to a lexicographic string compare
+otherwise, so both numeric ids and ISO-8601 timestamps work as a cursor.
+
+This mechanism is generic: any API that supports "give me records since X"
+via a URL/body parameter can use it, not just Kizeo. Inputs without a
+`state` block are completely unaffected — this is purely opt-in.
+
 ## Storage table shape
 
 The PostgreSQL writer expects the target table to exist already, with this

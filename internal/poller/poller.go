@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Atrabilis/api-poller/internal/config"
+	"github.com/Atrabilis/api-poller/internal/cursor"
 	"github.com/Atrabilis/api-poller/internal/decode"
 	"github.com/Atrabilis/api-poller/internal/extract"
 )
@@ -28,40 +29,66 @@ type Sample struct {
 	SourceURL   string            `json:"source_url"`
 }
 
-func Run(ctx context.Context, cfg config.Config, inputFilter string) ([]Sample, error) {
+// CursorUpdate is a candidate new cursor value produced by a poll. Callers
+// should only persist it (cursor.Write) after any storage write for this
+// run has succeeded, so a failed write can be retried instead of skipped.
+type CursorUpdate struct {
+	InputName string
+	File      string
+	Value     string
+}
+
+func Run(ctx context.Context, cfg config.Config, inputFilter string) ([]Sample, []CursorUpdate, error) {
 	var samples []Sample
+	var cursorUpdates []CursorUpdate
 
 	for _, input := range cfg.Inputs {
 		if inputFilter != "" && input.Name != inputFilter {
 			continue
 		}
 
-		inputSamples, err := runInput(ctx, input)
+		inputSamples, cursorUpdate, err := runInput(ctx, input)
 		if err != nil {
-			return nil, fmt.Errorf("input %q: %w", input.Name, err)
+			return nil, nil, fmt.Errorf("input %q: %w", input.Name, err)
 		}
 		samples = append(samples, inputSamples...)
+		if cursorUpdate != nil {
+			cursorUpdates = append(cursorUpdates, *cursorUpdate)
+		}
 	}
 
 	if inputFilter != "" && len(samples) == 0 {
-		return nil, fmt.Errorf("input %q not found or produced no samples", inputFilter)
+		return nil, nil, fmt.Errorf("input %q not found or produced no samples", inputFilter)
 	}
 
-	return samples, nil
+	return samples, cursorUpdates, nil
 }
 
-func runInput(ctx context.Context, input config.Input) ([]Sample, error) {
+func runInput(ctx context.Context, input config.Input) ([]Sample, *CursorUpdate, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, input.Request.Timeout)
 	defer cancel()
 
-	var body io.Reader
-	if input.Request.Body != "" {
-		body = strings.NewReader(input.Request.Body)
+	requestURL := input.Request.URL
+	requestBody := input.Request.Body
+	var cursorValue string
+	if input.State != nil {
+		var err error
+		cursorValue, err = cursor.Read(input.State.File, input.State.InitialValue)
+		if err != nil {
+			return nil, nil, fmt.Errorf("read cursor: %w", err)
+		}
+		requestURL = strings.ReplaceAll(requestURL, input.State.Placeholder, cursorValue)
+		requestBody = strings.ReplaceAll(requestBody, input.State.Placeholder, cursorValue)
 	}
 
-	req, err := http.NewRequestWithContext(reqCtx, input.Request.Method, input.Request.URL, body)
+	var body io.Reader
+	if requestBody != "" {
+		body = strings.NewReader(requestBody)
+	}
+
+	req, err := http.NewRequestWithContext(reqCtx, input.Request.Method, requestURL, body)
 	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
+		return nil, nil, fmt.Errorf("build request: %w", err)
 	}
 	for key, value := range input.Request.Headers {
 		req.Header.Set(key, value)
@@ -69,23 +96,23 @@ func runInput(ctx context.Context, input config.Input) ([]Sample, error) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("execute request: %w", err)
+		return nil, nil, fmt.Errorf("execute request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return nil, nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(errBody))
 	}
 
 	payload, err := decode.Payload(resp.Body, input.Response.Format)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	items, err := extract.ResolveItems(payload, input.Response.ItemsPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	observedAt := time.Now().UTC()
@@ -99,7 +126,7 @@ func runInput(ctx context.Context, input config.Input) ([]Sample, error) {
 		for _, item := range items {
 			match, err := extract.MatchesAll(item, conditions)
 			if err != nil {
-				return nil, fmt.Errorf("metric %q filter: %w", metric.Name, err)
+				return nil, nil, fmt.Errorf("metric %q filter: %w", metric.Name, err)
 			}
 			if !match {
 				continue
@@ -107,19 +134,38 @@ func runInput(ctx context.Context, input config.Input) ([]Sample, error) {
 
 			rawValue, err := extract.Resolve(item, metric.ValuePath)
 			if err != nil {
-				return nil, fmt.Errorf("metric %q value_path: %w", metric.Name, err)
+				return nil, nil, fmt.Errorf("metric %q value_path: %w", metric.Name, err)
 			}
 
-			sample, err := buildSample(input.Name, metric.Name, input.Request.URL, observedAt, metric.Labels, rawValue, metric.Transform)
+			sample, err := buildSample(input.Name, metric.Name, requestURL, observedAt, metric.Labels, rawValue, metric.Transform)
 			if err != nil {
-				return nil, fmt.Errorf("metric %q build sample: %w", metric.Name, err)
+				return nil, nil, fmt.Errorf("metric %q build sample: %w", metric.Name, err)
 			}
 			samples = append(samples, sample)
 			break
 		}
 	}
 
-	return samples, nil
+	var cursorUpdate *CursorUpdate
+	if input.State != nil {
+		newValue := cursorValue
+		for _, item := range items {
+			raw, err := extract.Resolve(item, input.State.CursorPath)
+			if err != nil {
+				continue
+			}
+			strValue, ok := cursor.Stringify(raw)
+			if !ok {
+				continue
+			}
+			newValue = cursor.Max(newValue, strValue)
+		}
+		if newValue != cursorValue {
+			cursorUpdate = &CursorUpdate{InputName: input.Name, File: input.State.File, Value: newValue}
+		}
+	}
+
+	return samples, cursorUpdate, nil
 }
 
 func buildSample(inputName, metricName, sourceURL string, observedAt time.Time, labels map[string]string, rawValue any, transform config.Transform) (Sample, error) {

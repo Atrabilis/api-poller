@@ -5,10 +5,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/Atrabilis/api-poller/internal/config"
+	"github.com/Atrabilis/api-poller/internal/cursor"
 )
 
 func TestRunInputJSON(t *testing.T) {
@@ -44,7 +46,7 @@ func TestRunInputJSON(t *testing.T) {
 		}},
 	}
 
-	samples, err := Run(context.Background(), cfg, "")
+	samples, _, err := Run(context.Background(), cfg, "")
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -93,7 +95,7 @@ func TestRunInputXML(t *testing.T) {
 		}},
 	}
 
-	samples, err := Run(context.Background(), cfg, "")
+	samples, _, err := Run(context.Background(), cfg, "")
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -144,7 +146,7 @@ func TestRunInputPOSTWithBody(t *testing.T) {
 		}},
 	}
 
-	samples, err := Run(context.Background(), cfg, "")
+	samples, _, err := Run(context.Background(), cfg, "")
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
@@ -193,10 +195,87 @@ func TestRunInputGETWithoutBodySendsNilBody(t *testing.T) {
 		}},
 	}
 
-	if _, err := Run(context.Background(), cfg, ""); err != nil {
+	if _, _, err := Run(context.Background(), cfg, ""); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
 	if contentLength > 0 {
 		t.Fatalf("content length = %d, want <= 0 (no body)", contentLength)
+	}
+}
+
+func TestRunInputWithStateAdvancesCursor(t *testing.T) {
+	cursorFile := filepath.Join(t.TempDir(), "input.cursor.json")
+
+	var gotBodies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		gotBodies = append(gotBodies, string(raw))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"_id":"100","value":1},{"_id":"278474498","value":2}]}`))
+	}))
+	defer server.Close()
+
+	newCfg := func() config.Config {
+		return config.Config{
+			Inputs: []config.Input{{
+				Name: "stateful_input",
+				State: &config.State{
+					File:       cursorFile,
+					CursorPath: "$._id",
+					// Placeholder and InitialValue left blank to also
+					// exercise config.applyDefaults.
+				},
+				Request: config.Request{
+					Method:  "POST",
+					URL:     server.URL,
+					Timeout: 5 * time.Second,
+					Body:    `{"min_id":"__CURSOR__"}`,
+				},
+				Response: config.Response{
+					Format:    "json",
+					ItemsPath: "$.data",
+				},
+				Metrics: []config.Metric{{
+					Name:      "value",
+					ValuePath: "$.value",
+					Transform: config.Transform{Scale: 1},
+				}},
+			}},
+		}
+	}
+
+	loadCfg := func() config.Config {
+		cfg := newCfg()
+		cfg.Inputs[0].State.Placeholder = "__CURSOR__"
+		cfg.Inputs[0].State.InitialValue = "0"
+		return cfg
+	}
+
+	// First run: no cursor file yet, so the placeholder must fall back to
+	// InitialValue, and the cursor must advance to the max _id seen.
+	_, cursorUpdates, err := Run(context.Background(), loadCfg(), "")
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(cursorUpdates) != 1 {
+		t.Fatalf("len(cursorUpdates) = %d, want 1", len(cursorUpdates))
+	}
+	if cursorUpdates[0].Value != "278474498" {
+		t.Fatalf("cursor value = %q, want 278474498", cursorUpdates[0].Value)
+	}
+	if err := cursor.Write(cursorUpdates[0].File, cursorUpdates[0].Value); err != nil {
+		t.Fatalf("cursor.Write returned error: %v", err)
+	}
+	if gotBodies[0] != `{"min_id":"0"}` {
+		t.Fatalf("first request body = %q, want cursor substituted with initial value 0", gotBodies[0])
+	}
+
+	// Second run: cursor file now holds the persisted value, so the next
+	// request must be built with it instead of the initial value.
+	if _, _, err := Run(context.Background(), loadCfg(), ""); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if gotBodies[1] != `{"min_id":"278474498"}` {
+		t.Fatalf("second request body = %q, want cursor substituted with persisted value", gotBodies[1])
 	}
 }

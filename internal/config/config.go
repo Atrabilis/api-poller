@@ -19,6 +19,19 @@ type Input struct {
 	Request  Request  `yaml:"request"`
 	Response Response `yaml:"response"`
 	Metrics  []Metric `yaml:"metrics"`
+	State    *State   `yaml:"state"`
+}
+
+// State configures incremental polling: before the request is built,
+// Placeholder is replaced in request.url and request.body with the value
+// persisted at File (or InitialValue if File doesn't exist yet). After a
+// successful poll, File is updated with the highest value found at
+// CursorPath across the extracted items.
+type State struct {
+	File         string `yaml:"file"`
+	Placeholder  string `yaml:"placeholder"`
+	CursorPath   string `yaml:"cursor_path"`
+	InitialValue string `yaml:"initial_value"`
 }
 
 type Request struct {
@@ -107,6 +120,14 @@ func applyDefaults(cfg *Config) {
 		if strings.TrimSpace(input.Response.Format) == "" {
 			input.Response.Format = "json"
 		}
+		if input.State != nil {
+			if input.State.Placeholder == "" {
+				input.State.Placeholder = "__CURSOR__"
+			}
+			if input.State.InitialValue == "" {
+				input.State.InitialValue = "0"
+			}
+		}
 		for j := range input.Metrics {
 			if input.Metrics[j].Transform.Scale == 0 {
 				input.Metrics[j].Transform.Scale = 1
@@ -126,6 +147,14 @@ func validate(cfg Config) error {
 		}
 		if input.Request.URL == "" {
 			return fmt.Errorf("input %q is missing request.url", input.Name)
+		}
+		if input.State != nil {
+			if input.State.File == "" {
+				return fmt.Errorf("input %q state is missing file", input.Name)
+			}
+			if input.State.CursorPath == "" {
+				return fmt.Errorf("input %q state is missing cursor_path", input.Name)
+			}
 		}
 		switch input.Response.Format {
 		case "", "json", "xml":

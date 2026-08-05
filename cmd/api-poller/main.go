@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/Atrabilis/api-poller/internal/config"
+	"github.com/Atrabilis/api-poller/internal/cursor"
 	"github.com/Atrabilis/api-poller/internal/poller"
 	"github.com/Atrabilis/api-poller/internal/storage"
 )
@@ -32,7 +33,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	samples, err := poller.Run(context.Background(), cfg, *inputName)
+	samples, cursorUpdates, err := poller.Run(context.Background(), cfg, *inputName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "run poller: %v\n", err)
 		os.Exit(1)
@@ -48,6 +49,15 @@ func main() {
 	if err := storage.WriteAll(context.Background(), writers, samples); err != nil {
 		fmt.Fprintf(os.Stderr, "write storage: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Cursors only advance once the write above is confirmed, so a failed
+	// write is retried on the next poll instead of silently skipped.
+	for _, update := range cursorUpdates {
+		if err := cursor.Write(update.File, update.Value); err != nil {
+			fmt.Fprintf(os.Stderr, "write cursor for input %q: %v\n", update.InputName, err)
+			os.Exit(1)
+		}
 	}
 
 	if !*writeOnly {
