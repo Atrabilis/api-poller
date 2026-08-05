@@ -10,7 +10,7 @@ them to PostgreSQL/TimescaleDB.
 
 ## Current scope
 
-- HTTP `GET` requests with configurable headers and timeout
+- HTTP requests (any method) with configurable headers, timeout, and an optional request body
 - JSON and XML response parsing into generic Go values
 - Declarative extraction using `items_path`, `value_path`, and `where`
 - Simple numeric transforms with `scale` and `offset`
@@ -98,6 +98,32 @@ inputs:
           unit: w.m-2
           device: 1MX401
 ```
+
+To poll an endpoint that requires a request body (e.g. a `POST` with a JSON
+filter), set `request.method` and `request.body`:
+
+```yaml
+inputs:
+  - name: kizeo_form_1081184
+    request:
+      method: POST
+      url: https://forms.kizeo.com/rest/v3/forms/1081184/data/advanced
+      timeout: 10s
+      headers:
+        Authorization: "{{ kizeo_api_token }}"
+        Content-Type: application/json
+      body: |
+        {"filters":[],"order":[{"col":"_id","type":"desc"}]}
+    response:
+      format: json
+      items_path: $.data
+    metrics:
+      - name: tracker_1_atamo_i
+        value_path: $.tracker_1_atamo_i
+```
+
+`body` is sent verbatim as the request payload; it's optional and only used
+when set, so existing `GET`-only inputs are unaffected.
 
 ## Storage table shape
 

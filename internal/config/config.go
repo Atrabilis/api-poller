@@ -26,6 +26,7 @@ type Request struct {
 	URL     string            `yaml:"url"`
 	Timeout time.Duration     `yaml:"timeout"`
 	Headers map[string]string `yaml:"headers"`
+	Body    string            `yaml:"body"`
 }
 
 type Response struct {

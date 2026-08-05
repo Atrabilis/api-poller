@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Atrabilis/api-poller/internal/config"
@@ -53,7 +54,12 @@ func runInput(ctx context.Context, input config.Input) ([]Sample, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, input.Request.Timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(reqCtx, input.Request.Method, input.Request.URL, nil)
+	var body io.Reader
+	if input.Request.Body != "" {
+		body = strings.NewReader(input.Request.Body)
+	}
+
+	req, err := http.NewRequestWithContext(reqCtx, input.Request.Method, input.Request.URL, body)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
