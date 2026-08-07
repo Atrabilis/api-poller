@@ -279,3 +279,45 @@ func TestRunInputWithStateAdvancesCursor(t *testing.T) {
 		t.Fatalf("second request body = %q, want cursor substituted with persisted value", gotBodies[1])
 	}
 }
+
+func TestRunInputExpandsEnvInHeaders(t *testing.T) {
+	t.Setenv("TEST_BASIC_AUTH", "Basic YWRtaW46c29sdGVj")
+
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"io":{"ai":[{"aiIndex":0,"aiValueScaled":1}]}}`))
+	}))
+	defer server.Close()
+
+	cfg := config.Config{
+		Inputs: []config.Input{{
+			Name: "env_header_input",
+			Request: config.Request{
+				Method:  "GET",
+				URL:     server.URL,
+				Timeout: 5 * time.Second,
+				Headers: map[string]string{
+					"Authorization": "${TEST_BASIC_AUTH}",
+				},
+			},
+			Response: config.Response{
+				Format:    "json",
+				ItemsPath: "$.io.ai",
+			},
+			Metrics: []config.Metric{{
+				Name:      "metric",
+				ValuePath: "$.aiValueScaled",
+				Transform: config.Transform{Scale: 1},
+			}},
+		}},
+	}
+
+	if _, _, err := Run(context.Background(), cfg, ""); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if gotAuth != "Basic YWRtaW46c29sdGVj" {
+		t.Fatalf("Authorization header = %q, want expanded env value", gotAuth)
+	}
+}

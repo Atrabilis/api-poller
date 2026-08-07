@@ -190,6 +190,21 @@ generic row model:
 That keeps the collector general: each new API integration only changes YAML,
 not the SQL table schema.
 
+## Secrets in headers
+
+`request.headers` values support `${VAR_NAME}` expansion from the process
+environment, resolved at request time -- same indirection already used for
+storage credentials (`host_env`, `password_env`, ...), applied to headers:
+
+```yaml
+headers:
+  Authorization: "${SOLTEC_BASIC_AUTH}"
+```
+
+`SOLTEC_BASIC_AUTH` then only needs to exist in the deployed `.env` file (or
+process environment), never as plaintext in the committed YAML. Values
+without a `${...}` reference are used as-is, so this is opt-in per header.
+
 ## Notes
 
 - Paths support a small subset tailored for telemetry payloads:

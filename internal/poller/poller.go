@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -91,7 +92,7 @@ func runInput(ctx context.Context, input config.Input) ([]Sample, *CursorUpdate,
 		return nil, nil, fmt.Errorf("build request: %w", err)
 	}
 	for key, value := range input.Request.Headers {
-		req.Header.Set(key, value)
+		req.Header.Set(key, expandEnv(value))
 	}
 
 	resp, err := http.DefaultClient.Do(req)
@@ -232,4 +233,12 @@ func stringifyScalar(value any) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// expandEnv resolves ${VAR_NAME} references in header values from the
+// process environment, so secrets can live in the deployed .env file
+// (same *_env indirection already used for storage credentials) instead of
+// as plaintext in the committed YAML config.
+func expandEnv(value string) string {
+	return os.Expand(value, os.Getenv)
 }
