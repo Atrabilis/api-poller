@@ -215,3 +215,7 @@ without a `${...}` reference are used as-is, so this is opt-in per header.
 - If `items_path` is omitted, metrics are resolved against the whole document.
 - For XML, paths are resolved relative to the root element, so `<response><roll>`
   is addressed as `$.roll`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
