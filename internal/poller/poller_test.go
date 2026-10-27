@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -319,5 +320,45 @@ func TestRunInputExpandsEnvInHeaders(t *testing.T) {
 	}
 	if gotAuth != "Basic YWRtaW46c29sdGVj" {
 		t.Fatalf("Authorization header = %q, want expanded env value", gotAuth)
+	}
+}
+
+func TestRunKeepsWorkingInputsWhenOneFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"io":{"ai":[{"aiIndex":0,"aiValueScaled":1.5}]}}`))
+	}))
+	defer server.Close()
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	downURL := down.URL
+	down.Close() // nothing listens there any more
+
+	input := func(name, url string) config.Input {
+		return config.Input{
+			Name:     name,
+			Request:  config.Request{Method: "GET", URL: url, Timeout: 2 * time.Second},
+			Response: config.Response{Format: "json", ItemsPath: "$.io.ai"},
+			Metrics: []config.Metric{{
+				Name:      "metric_json",
+				ValuePath: "$.aiValueScaled",
+				Transform: config.Transform{Scale: 1},
+			}},
+		}
+	}
+	cfg := config.Config{Inputs: []config.Input{
+		input("first_ok", server.URL),
+		input("unreachable", downURL),
+		input("second_ok", server.URL),
+	}}
+
+	samples, _, err := Run(context.Background(), cfg, "")
+	if err == nil || !strings.Contains(err.Error(), `input "unreachable"`) {
+		t.Fatalf("expected an error naming the failed input, got %v", err)
+	}
+	if strings.Contains(err.Error(), "first_ok") || strings.Contains(err.Error(), "second_ok") {
+		t.Fatalf("the error must only name failed inputs: %v", err)
+	}
+	if len(samples) != 2 || samples[0].InputName != "first_ok" || samples[1].InputName != "second_ok" {
+		t.Fatalf("expected the samples of both working inputs, got %+v", samples)
 	}
 }

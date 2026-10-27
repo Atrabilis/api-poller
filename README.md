@@ -223,7 +223,9 @@ go vet ./...
 go test ./...
 ```
 
-`cmd/api-poller/e2e_test.go` builds the binary and runs it like the systemd timer (`-config <file> -write-only`) against a fake HTTP device and a real PostgreSQL table with the layout of `psda.api_samples`. It covers a Soltec XML status page with basic auth taken from the environment, a Moxa E1240 JSON list with `items_path`, `where` and `transform`, a device rejecting missing credentials, and documents that one unreachable device currently fails the whole run, so the other inputs of the same config are not written.
+`cmd/api-poller/e2e_test.go` builds the binary and runs it like the systemd timer (`-config <file> -write-only`) against a fake HTTP device and a real PostgreSQL table with the layout of `psda.api_samples`. It covers a Soltec XML status page with basic auth taken from the environment, a Moxa E1240 JSON list with `items_path`, `where` and `transform`, a device rejecting missing credentials, and one unreachable device in a config with others.
+
+**When an input fails** (device unreachable, HTTP error, bad payload), the other inputs of the same config are still polled and written, and their cursors advance; each failed input is printed as `run poller: input "<name>": <error>` and the run exits with status 1 so systemd marks it as failed. Before 2026-10-27 the first failure dropped the whole run.
 
 They are skipped unless `API_POLLER_E2E_PG` points to a PostgreSQL server:
 

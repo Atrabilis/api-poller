@@ -3,6 +3,7 @@ package poller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -39,9 +40,16 @@ type CursorUpdate struct {
 	Value     string
 }
 
+// Run polls every input (or only inputFilter). An input that fails does not
+// stop the others: the samples and cursor updates of the inputs that worked
+// are returned together with an error naming each input that failed, so the
+// caller can still write them. Before 2026-10-27 the first failure dropped
+// the whole run, and one unreachable device lost the data of every other
+// device in the same config.
 func Run(ctx context.Context, cfg config.Config, inputFilter string) ([]Sample, []CursorUpdate, error) {
 	var samples []Sample
 	var cursorUpdates []CursorUpdate
+	var failures []error
 
 	for _, input := range cfg.Inputs {
 		if inputFilter != "" && input.Name != inputFilter {
@@ -50,7 +58,8 @@ func Run(ctx context.Context, cfg config.Config, inputFilter string) ([]Sample, 
 
 		inputSamples, cursorUpdate, err := runInput(ctx, input)
 		if err != nil {
-			return nil, nil, fmt.Errorf("input %q: %w", input.Name, err)
+			failures = append(failures, fmt.Errorf("input %q: %w", input.Name, err))
+			continue
 		}
 		samples = append(samples, inputSamples...)
 		if cursorUpdate != nil {
@@ -58,11 +67,11 @@ func Run(ctx context.Context, cfg config.Config, inputFilter string) ([]Sample, 
 		}
 	}
 
-	if inputFilter != "" && len(samples) == 0 {
+	if inputFilter != "" && len(samples) == 0 && len(failures) == 0 {
 		return nil, nil, fmt.Errorf("input %q not found or produced no samples", inputFilter)
 	}
 
-	return samples, cursorUpdates, nil
+	return samples, cursorUpdates, errors.Join(failures...)
 }
 
 func runInput(ctx context.Context, input config.Input) ([]Sample, *CursorUpdate, error) {

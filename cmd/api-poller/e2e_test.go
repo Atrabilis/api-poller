@@ -317,25 +317,26 @@ func TestE2EMissingAuthIsRejectedByTheDevice(t *testing.T) {
 	}
 }
 
-// Documents current behavior: one unreachable device makes the whole run
-// fail, and the devices that answered in the same config are not written.
-func TestE2EOneUnreachableDeviceDropsTheRun(t *testing.T) {
+// One unreachable device must not lose the devices that answered in the same
+// config: they are written, the failed input is named, and the run still
+// exits non-zero so systemd marks it as failed.
+func TestE2EOneUnreachableDeviceKeepsTheOthers(t *testing.T) {
 	e := setupAPIE2E(t)
 	devices := fakeDevices(t)
 	configPath := e.config(t, moxaInput("psda_2mx401", closedURL(t))+moxaInput("psda_2mx402", devices.URL))
 
 	out, err := e.run(t, configPath)
 	if err == nil {
-		t.Fatalf("expected the run to fail when a device is unreachable\n%s", out)
+		t.Fatalf("expected a non-zero exit when a device is unreachable\n%s", out)
 	}
-	if !strings.Contains(out, `input "psda_2mx401"`) {
-		t.Fatalf("expected the failing input to be named\n%s", out)
+	if !strings.Contains(out, `run poller: input "psda_2mx401"`) || strings.Contains(out, `input "psda_2mx402":`) {
+		t.Fatalf("expected only the failing input to be reported\n%s", out)
 	}
 	var n int
-	if err := e.conn.QueryRow(context.Background(), "SELECT count(*) FROM "+e.table).Scan(&n); err != nil {
+	if err := e.conn.QueryRow(context.Background(), "SELECT count(*) FROM "+e.table+" WHERE input_name = 'psda_2mx402'").Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 0 {
-		t.Fatalf("current behavior writes nothing when one input fails, got %d rows", n)
+	if n != 2 {
+		t.Fatalf("expected the 2 metrics of the device that answered, got %d rows\n%s", n, out)
 	}
 }

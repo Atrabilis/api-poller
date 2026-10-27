@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/Atrabilis/api-poller/internal/config"
 	"github.com/Atrabilis/api-poller/internal/cursor"
@@ -33,9 +34,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	samples, cursorUpdates, err := poller.Run(context.Background(), cfg, *inputName)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "run poller: %v\n", err)
+	// pollErr names the inputs that failed; the others are still written below.
+	samples, cursorUpdates, pollErr := poller.Run(context.Background(), cfg, *inputName)
+	if pollErr != nil && len(samples) == 0 {
+		reportPollFailures(pollErr)
 		os.Exit(1)
 	}
 
@@ -71,6 +73,20 @@ func main() {
 				os.Exit(1)
 			}
 		}
+	}
+
+	// Keep a non-zero exit so systemd still marks the run as failed.
+	if pollErr != nil {
+		reportPollFailures(pollErr)
+		storage.CloseAll(writers)
+		os.Exit(1)
+	}
+}
+
+// reportPollFailures prints one "run poller: input ..." line per failed input.
+func reportPollFailures(err error) {
+	for _, line := range strings.Split(err.Error(), "\n") {
+		fmt.Fprintf(os.Stderr, "run poller: %s\n", line)
 	}
 }
 
