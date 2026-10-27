@@ -216,6 +216,25 @@ without a `${...}` reference are used as-is, so this is opt-in per header.
 - For XML, paths are resolved relative to the root element, so `<response><roll>`
   is addressed as `$.roll`.
 
+## Testing
+
+```bash
+go vet ./...
+go test ./...
+```
+
+`cmd/api-poller/e2e_test.go` builds the binary and runs it like the systemd timer (`-config <file> -write-only`) against a fake HTTP device and a real PostgreSQL table with the layout of `psda.api_samples`. It covers a Soltec XML status page with basic auth taken from the environment, a Moxa E1240 JSON list with `items_path`, `where` and `transform`, a device rejecting missing credentials, and documents that one unreachable device currently fails the whole run, so the other inputs of the same config are not written.
+
+They are skipped unless `API_POLLER_E2E_PG` points to a PostgreSQL server:
+
+```bash
+docker run -d --rm --name ap-e2e-pg -e POSTGRES_PASSWORD=e2e -p 127.0.0.1:55435:5432 postgres:17.9
+API_POLLER_E2E_PG=postgres://postgres:e2e@127.0.0.1:55435/postgres go test ./cmd/api-poller
+docker stop ap-e2e-pg
+```
+
+CI runs them with a PostgreSQL service and publishes the merged coverage (tests and binary) in the job summary.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
