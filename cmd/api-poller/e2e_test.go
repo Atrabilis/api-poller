@@ -58,11 +58,11 @@ func fakeDevices(t *testing.T) *httptest.Server {
 			return
 		}
 		w.Header().Set("Content-Type", "text/xml")
-		fmt.Fprintf(w, `<response><roll>12.5</roll><pitch>-0.4</pitch><action>TRACK</action><batt_charge>87</batt_charge><dev>%s</dev></response>`, r.URL.Query().Get("dev"))
+		_, _ = fmt.Fprintf(w, `<response><roll>12.5</roll><pitch>-0.4</pitch><action>TRACK</action><batt_charge>87</batt_charge><dev>%s</dev></response>`, r.URL.Query().Get("dev"))
 	})
 	mux.HandleFunc("/api/slot/0/io/ai", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"io":{"ai":[{"aiIndex":0,"aiValueScaled":5.2},{"aiIndex":1,"aiValueScaled":31.5},{"aiIndex":2,"aiValueScaled":0}]}}`)
+		_, _ = fmt.Fprint(w, `{"io":{"ai":[{"aiIndex":0,"aiValueScaled":5.2},{"aiIndex":1,"aiValueScaled":31.5},{"aiIndex":2,"aiValueScaled":0}]}}`)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -77,7 +77,7 @@ func closedURL(t *testing.T) string {
 		t.Fatal(err)
 	}
 	addr := ln.Addr().String()
-	ln.Close()
+	_ = ln.Close()
 	return "http://" + addr
 }
 
@@ -104,7 +104,7 @@ func setupAPIE2E(t *testing.T) *apiE2E {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	t.Cleanup(func() { conn.Close(context.Background()) })
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
 
 	schema := fmt.Sprintf("e2e_%d", time.Now().UnixNano())
 	if _, err := conn.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {

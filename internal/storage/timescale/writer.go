@@ -124,7 +124,7 @@ func (w *Writer) WriteSamples(ctx context.Context, samples []poller.Sample) erro
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	query := fmt.Sprintf(`
 		INSERT INTO %s (

@@ -108,7 +108,7 @@ func runInput(ctx context.Context, input config.Input) ([]Sample, *CursorUpdate,
 	if err != nil {
 		return nil, nil, fmt.Errorf("execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
